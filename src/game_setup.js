@@ -2,19 +2,15 @@
 var canvas = null;
 // the canvas 2d context
 var ctx = null;
-// an image containing all sprites
-var spritesheet = null;
-// true when the spritesheet has been downloaded
-var spritesheetLoaded = false;
-
+// An array containing a history of commands
 var commandHistory = [];
 
 // the world grid: a 2d array of tiles
 var world = [[]];
 
 // size in the world in sprite tiles
-var worldWidth = 30;
-var worldHeight = 30;
+var worldWidth = 20;
+var worldHeight = 20;
 
 // size of a tile in pixels
 var tileWidth = 32;
@@ -32,48 +28,38 @@ var posX = 0;
 var posY = 0;
 
 // Position of enemy
-var posEnemyX = 30;
+var posEnemyX = worldWidth-2;
 var posEnemyY = 0;
+
+var hasLost = false;
+var hasWon = false;
 
 // the html page is ready
 function onload() {
 	console.log('Page loaded.');
 	canvas = document.getElementById('gameCanvas');
-	canvas.width = window.innerWidth;
-	canvas.height = window.innerHeight;
-	canvas.addEventListener("click", canvasClick, false);
+	canvas.width = worldWidth * tileWidth;
+	canvas.height = worldHeight * tileHeight;
 	if (!canvas) alert('Blah!');
 	ctx = canvas.getContext("2d");
 	if (!ctx) alert('Hmm!');
 
 	ctx.fillStyle = "black";
 	ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-	ctx.fillStyle = "grey";
-	ctx.fillRect(posX, posY, tileWidth, tileHeight);
-
-	ctx.fillStyle = "red";
-	ctx.fillRect(posEnemyX * tileWidth, posEnemyY * tileHeight, tileWidth, tileHeight);
-
-	console.log('Spritesheet loaded.');
-	spritesheetLoaded = true;
 	
 	console.log('Creating world...');
 
 	// create emptiness
-	for (var x=0; x < worldWidth; x++)
-	{
+	for (var x=0; x < worldWidth; x++) {
 		world[x] = [];
 
-		for (var y=0; y < worldHeight; y++)
-		{
+		for (var y=0; y < worldHeight; y++) {
 			world[x][y] = 0;
 		}
 	}
 
 	// scatter some walls
-	for (var x=0; x < worldWidth; x++)
-	{
+	for (var x=0; x < worldWidth; x++) {
 		for (var y=0; y < worldHeight; y++)
 		{
 			if (Math.random() > 0.80) {
@@ -84,18 +70,24 @@ function onload() {
 		}
 	}
 
+	ctx.fillStyle = "grey";
+	ctx.fillRect(posX, posY, tileWidth, tileHeight);
+	world[posX][posY] = 4;
+
+	ctx.fillStyle = "red";
+	ctx.fillRect(posEnemyX * tileWidth, posEnemyY * tileHeight, tileWidth, tileHeight);
+	world[posEnemyX][posEnemyY] = 3;
+
 	function sleep(ms) {
 		return new Promise(resolve => setTimeout(resolve, ms));
 	}
 
 	// Check if something is moving outside the canvas
 	function isOutside(nextXCord, nextYCord) {
-		// Is it outside on x axis?
-		let isOutside = (nextXCord < 0 || nextXCord > worldWidth) ? true : false;
-
-		// Is it outside on y axis?
-		isOutside = (nextYCord < 0 || nextYCord > worldHeight) ? true : false;
-
+		// Is it outside on x- or y-axis?
+		var isOutsideX = (nextXCord < 0 || nextXCord > worldWidth) ? true : false;
+		var isOutsideY = (nextYCord < 0 || nextYCord > worldHeight) ? true : false;
+		var isOutside = (isOutsideX || isOutsideY) ? true : false;
 		return isOutside;
 	}	
 	
@@ -105,8 +97,6 @@ function onload() {
 		// The next coordinates for the projectile.
 		var nextXCord = startX;
 		var nextYCord = startY;
-		var width = tileWidth;
-		var height = projectileHeight;
 
 		switch (orientation) {
 			case "w":
@@ -132,23 +122,25 @@ function onload() {
 				height = tileHeight;
 				break;
 		}
-		
-		if (nextXCord === posEnemyX && nextYCord === posEnemyY) {
-			alert("Hit!")
-			ctx.fillStyle = "black";
-			ctx.fillRect(posEnemyX * tileWidth, posEnemyY * tileHeight, tileWidth, tileHeight);
-		}
-		ctx.fillStyle = "black";
-		ctx.fillRect(startX * tileWidth, startY * tileHeight, tileWidth, tileHeight);
-	
-		ctx.fillStyle = "blue";
-		ctx.fillRect(nextXCord * tileWidth, nextYCord * tileHeight, width, height);
-	
-		if (!isOutside()) {
-			console.log(posEnemyX + " : " + posEnemyY);
+
+		if (!isOutside(nextXCord, nextYCord)) {
+
+			// Do not update 2d world array to a projectile/abyss if there is an enemy there.
+			if (nextXCord != posEnemyX && nextYCord != posEnemyY) {
+				world[nextXCord][nextYCord] = 2;
+			}
+
+			if (startX != posEnemyX && startY != posEnemyY) {
+				world[startX][startY] = 0;
+			}
+			redraw(world);
+
 			await sleep(10);
 			shootProjectile(nextXCord, nextYCord, firstX, firstY);
+		} else {
+			world[startX][startY] = 0;
 		}
+
 	}
 
 	// Enemies move to player
@@ -156,27 +148,34 @@ function onload() {
 		currentPath = [];
 		pathStart = [posEnemyX, posEnemyY];
 		pathEnd = [posX, posY];
+
+		// Find shortest path to player
 		currentPath = findPath(world,pathStart,pathEnd);
 
-		ctx.clearRect(posEnemyX * tileWidth, posEnemyY * tileHeight, tileWidth, tileHeight);
-		ctx.fillStyle = "black";
-		ctx.fillRect(posEnemyX * tileWidth, posEnemyY * tileHeight, tileWidth, tileHeight);
+		world[posEnemyX][posEnemyY] = 0;
 
+		// Returns the first decision since currentPath[0] returns the state it is in.
 		posEnemyX = currentPath[1][0];
 		posEnemyY = currentPath[1][1];
 
-		ctx.fillStyle = "red";
-		ctx.fillRect(posEnemyX * tileWidth, posEnemyY * tileHeight, tileWidth, tileHeight);
-		
-		await sleep(150);
-		moveEnemies();
+		// Say that the pos is an enemy block & redraw it all.
+		world[posEnemyX][posEnemyY] = 3;
+		redraw(world);
+
+		// If enemy got you
+		if (posX === posEnemyX && posY === posEnemyY) {
+			hasLost = true;
+			alert("You have lost!");
+		}
+
+		if (!hasWon) {
+			await sleep(150);
+			moveEnemies();
+		}
 	}
 
 	window.onkeydown = function(e) {
-		ctx.clearRect(posX * tileWidth, posY * tileHeight, tileWidth, tileHeight);
-		ctx.fillStyle = "black";
-		ctx.fillRect(posX * tileWidth, posY * tileHeight, tileWidth, tileHeight);
-		console.log(e);
+		world[posX][posY] = 0;
 
 		commandHistory.push(e.key);
 		
@@ -206,138 +205,95 @@ function onload() {
 				break;
 		}
 
-		ctx.fillStyle = "grey";
-		ctx.fillRect(posX * tileWidth, posY * tileHeight, tileWidth, tileHeight);
+		if (posX === worldWidth - 1) {
+			alert("You have won! Now refresh to retry...");
+			hasWon = true;
+		}
+
+		// 4 in the 2d array means that it's a player - see redraw().
+		if (!hasLost || !hasWon) {
+			world[posX][posY] = 4;
+			redraw(world);
+		}
 	}
 
 	moveEnemies();
-
 }
 
+// Redraw a new world based on the world 2d array
+function redraw(world) {
+	console.log(world)
 
-function redraw()
-{
+	for (var x=0; x < worldWidth; x++) {
+		for (var y=0; y < worldHeight; y++) {
 
-	console.log('redrawing...');
-
-	for (var x=0; x < worldWidth; x++)
-	{
-		for (var y=0; y < worldHeight; y++)
-		{
-
-			// choose a sprite to draw
-			switch(world[x][y])
-			{
-			case 1:
-				ctx.fillStyle = 'white';
-				break;
-			default:
-				ctx.fillStyle = 'black';
-				break;
+			// choose a block to draw
+			switch(world[x][y])	{
+				case 1: // Wall
+					ctx.fillStyle = 'white';
+					break;
+				case 2: // Projectile
+					ctx.fillStyle = 'blue';
+					break;
+				case 3: // Enemy
+					ctx.fillStyle = 'red';
+					break;
+				case 4: // Player
+					ctx.fillStyle = 'grey';
+					break;
+				default: // Abyss
+					ctx.fillStyle = 'black';
+					break;
 			}
 
-			ctx.fillRect(x*tileWidth, y*tileHeight,
-			tileWidth, tileHeight);
+			// Draw the rectangle based on what it is.
+			ctx.fillRect(x*tileWidth, y*tileHeight,tileWidth, tileHeight);
 
 		}
 	}
-
-	// draw the path
-	console.log('Current path length: '+currentPath.length);
-	for (rp=0; rp<currentPath.length; rp++)
-	{
-		switch(rp)
-		{
-		case 0:
-			ctx.fillStyle = 'green'; // start
-			break;
-		case currentPath.length-1:
-			ctx.fillStyle = 'red'; // end
-			break;
-		default:
-			ctx.fillStyle = 'grey'; // path node
-			break;
-		}
-
-		ctx.fillRect(currentPath[rp][0]*tileWidth,
-		currentPath[rp][1]*tileHeight,
-		tileWidth, tileHeight);
-	}		
+	
+	ctx.fillStyle = "grey";
+	ctx.fillRect(posX*tileWidth, posY*tileHeight, tileWidth, tileHeight);
 }
 
-// handle click events on the canvas
-function canvasClick(e)
-{
-	var x;
-	var y;
 
-	// grab html page coords
-	if (e.pageX != undefined && e.pageY != undefined)
-	{
-		x = e.pageX;
-		y = e.pageY;
-	}
-	else
-	{
-		x = e.clientX + document.body.scrollLeft +
-		document.documentElement.scrollLeft;
-		y = e.clientY + document.body.scrollTop +
-		document.documentElement.scrollTop;
-	}
-
-	// make them relative to the canvas only
-	x -= canvas.offsetLeft;
-	y -= canvas.offsetTop;
-
-	// return tile x,y that we clicked
-	var cell =
-	[
-	Math.floor(x/tileWidth),
-	Math.floor(y/tileHeight)
-	];
-
-	// now we know while tile we clicked
-	console.log('we clicked tile '+cell[0]+','+cell[1]);
-
-	pathStart = pathEnd;
-	pathEnd = cell;
-
-	// calculate path
-	currentPath = findPath(world,pathStart,pathEnd);
-	redraw();
-}
-
-// world is a 2d array of integers (eg world[10][15] = 0)
-// pathStart and pathEnd are arrays like [5,10]
-function findPath(world, pathStart, pathEnd)
-{
-	// shortcuts for speed
+// Find path to player function
+function findPath(thisWorld, pathStart, pathEnd) {
+	// shortcuts for speed 
 	var	abs = Math.abs;
-	var	max = Math.max;
-	var	pow = Math.pow;
-	var	sqrt = Math.sqrt;
 
 	var maxWalkableTileNum = 0;
 
-	var worldWidth = world[0].length;
-	var worldHeight = world.length;
+	var worldWidth = thisWorld[0].length;
+	var worldHeight = thisWorld.length;
 	var worldSize =	worldWidth * worldHeight;
 
-	// which heuristic should we use?
-	// default: no diagonals (Manhattan)
+	var localWorld = {};
+	for (var x = 0; x < worldWidth; x++) {
+		localWorld[x] = thisWorld[x];
+	}
+
+	// Reformat world to binary - abyss or block (0 or 1) 
+	for (var x = 0; x < worldWidth; x++) {
+		for (var y = 0; y < worldHeight; y++) {
+			if (thisWorld[x][y] === 2 || thisWorld[x][y] === 1) {
+				localWorld[x][y] = 1;
+			} else {
+				localWorld[x][y] = 0;
+			}
+		}
+	}
+
+	// distance function - Manhattan (no diagonal distances)
 	var distanceFunction = ManhattanDistance;
 	var findNeighbours = function(){}; // empty
 
-	// distanceFunction functions
-	// these return how far away a point is to another
-
-	function ManhattanDistance(Point, Goal)
-	{	// linear movement - no diagonals - just cardinal directions (NSEW)
+	function ManhattanDistance(Point, Goal) {	// linear movement - no diagonals
 		return abs(Point.x - Goal.x) + abs(Point.y - Goal.y);
 	}
 
-	function Neighbours(x, y)
-	{
+	// Returns neighbouring tiles.
+	function Neighbours(x, y) {
 		var	N = y - 1,
 		S = y + 1,
 		E = x + 1,
@@ -359,64 +315,17 @@ function findPath(world, pathStart, pathEnd)
 		return result;
 	}
 
-	// returns every available North East, South East,
-	// South West or North West cell - no squeezing through
-	// "cracks" between two diagonals
-	function DiagonalNeighbours(myN, myS, myE, myW, N, S, E, W, result)
-	{
-		if(myN)
-		{
-			if(myE && canWalkHere(E, N))
-			result.push({x:E, y:N});
-			if(myW && canWalkHere(W, N))
-			result.push({x:W, y:N});
-		}
-		if(myS)
-		{
-			if(myE && canWalkHere(E, S))
-			result.push({x:E, y:S});
-			if(myW && canWalkHere(W, S))
-			result.push({x:W, y:S});
-		}
-	}
-
-	// returns every available North East, South East,
-	// South West or North West cell including the times that
-	// you would be squeezing through a "crack"
-	function DiagonalNeighboursFree(myN, myS, myE, myW, N, S, E, W, result)
-	{
-		myN = N > -1;
-		myS = S < worldHeight;
-		myE = E < worldWidth;
-		myW = W > -1;
-		if(myE)
-		{
-			if(myN && canWalkHere(E, N))
-			result.push({x:E, y:N});
-			if(myS && canWalkHere(E, S))
-			result.push({x:E, y:S});
-		}
-		if(myW)
-		{
-			if(myN && canWalkHere(W, N))
-			result.push({x:W, y:N});
-			if(myS && canWalkHere(W, S))
-			result.push({x:W, y:S});
-		}
-	}
-
 	// returns boolean value (world cell is available and open)
 	function canWalkHere(x, y)
 	{
-		return ((world[x] != null) &&
-			(world[x][y] != null) &&
-			(world[x][y] <= maxWalkableTileNum));
+		return ((localWorld[x] != null) &&
+			(localWorld[x][y] != null) &&
+			(localWorld[x][y] <= maxWalkableTileNum));
 	};
 
 	// Node function, returns a new object with Node properties
 	// Used in the calculatePath function to store route costs, etc.
-	function Node(Parent, Point)
-	{
+	function Node(Parent, Point) {
 		var newNode = {
 			// pointer to another Node object
 			Parent:Parent,
@@ -425,11 +334,7 @@ function findPath(world, pathStart, pathEnd)
 			// the location coordinates of this Node
 			x:Point.x,
 			y:Point.y,
-			// the heuristic estimated cost
-			// of an entire path using this node
 			f:0,
-			// the distanceFunction cost to get
-			// from the starting point to this node
 			g:0
 		};
 

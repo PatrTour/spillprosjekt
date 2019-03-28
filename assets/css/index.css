@@ -1,18 +1,19 @@
 body {
     padding: 0;
     margin: 0;
+    background: #000;
+    font-family: 'Roboto Mono', monospace;
+    color: #fff;
+    text-align: center;
 }
 
 ::-webkit-scrollbar { 
     display: none; 
 }
 
-input {
-    position: absolute;
-}
-
-#gameCanvas {
-    z-index: 10;
-    left: 0;
-    position: absolute;
+p {
+    max-width: 600px;
+    position: relative;
+    transform: translateX(-50%);
+    left: 50%;
 }
